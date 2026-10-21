@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI Pathfinding Lab | Dijkstra vs A*</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              900: '#0c4a6e'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Prevent unwanted touch zooming and callouts on mobile touch screens */
+    body {
+      touch-action: manipulation;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+    
+    /* Strict CSS Grid Matrix Layout */
+    .matrix-grid {
+      display: grid !important;
+      gap: 3px;
+      width: 100%;
+      max-width: 480px;
+      margin: 0 auto;
+      aspect-ratio: 1 / 1;
+    }
+    
+    /* Responsive Square Cells */
+    .cell {
+      aspect-ratio: 1 / 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease-in-out;
+      user-select: none;
+    }
+
+    /* Cell States */
+    .cell-empty { background-color: #1e293b; }
+    .cell-empty:hover { background-color: #334155; }
+    .cell-wall { background-color: #475569; border: 1px solid #64748b; transform: scale(0.96); }
+    .cell-start { background-color: #10b981; color: white; box-shadow: 0 0 10px rgba(16,185,129,0.5); }
+    .cell-goal { background-color: #ef4444; color: white; box-shadow: 0 0 10px rgba(239,68,68,0.5); }
+    
+    /* Visualization States */
+    .cell-visited-dijkstra { background-color: #3b82f6; animation: pop 0.2s ease; }
+    .cell-visited-astar { background-color: #8b5cf6; animation: pop 0.2s ease; }
+    .cell-path { background-color: #f59e0b !important; color: white; transform: scale(1.05); z-index: 10; box-shadow: 0 0 12px rgba(245,158,11,0.8); }
+
+    @keyframes pop {
+      0% { transform: scale(0.5); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col items-center justify-between p-3 sm:p-6">
+
+  <!-- Header -->
+  <header class="w-full max-w-xl text-center my-2">
+    <div class="inline-flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1 rounded-full text-xs font-semibold text-sky-400 mb-2">
+      <span class="w-2 h-2 rounded-full bg-sky-400 animate-pulse"></span> Mobile & Desktop Compatible
+    </div>
+    <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
+      AI Pathfinding Lab
+    </h1>
+    <p class="text-xs sm:text-sm text-slate-400 mt-1">
+      Dijkstra (Uniform) vs A* (Heuristic Search)
+    </p>
+  </header>
+
+  <!-- Controls Container -->
+  <main class="w-full max-w-xl flex flex-col items-center gap-4 my-auto">
+    
+    <!-- Controls & Device Switcher -->
+    <div class="w-full bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 backdrop-blur shadow-xl">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <label class="text-xs font-medium text-slate-400">Grid Matrix Dimensions:</label>
+        <div class="flex bg-slate-800 p-1 rounded-lg border border-slate-700">
+          <button id="btn-size-6" onclick="setGridSize(6)" class="px-3 py-1 text-xs rounded-md font-medium transition-all bg-sky-500 text-white shadow">6x6 Mobile</button>
+          <button id="btn-size-8" onclick="setGridSize(8)" class="px-3 py-1 text-xs rounded-md font-medium text-slate-400 transition-all hover:text-white">8x8 Grid</button>
+          <button id="btn-size-10" onclick="setGridSize(10)" class="px-3 py-1 text-xs rounded-md font-medium text-slate-400 transition-all hover:text-white">10x10 Desktop</button>
+        </div>
+      </div>
+
+      <!-- Action Presets -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <button onclick="randomizeGrid()" class="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 text-xs font-semibold py-2.5 px-3 rounded-xl transition border border-slate-700">
+          🎲 Randomize
+        </button>
+        <button onclick="clearGrid()" class="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 text-xs font-semibold py-2.5 px-3 rounded-xl transition border border-slate-700">
+          🧹 Clear Walls
+        </button>
+        <button onclick="runRaceBenchmark()" class="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white text-xs font-bold py-2.5 px-3 rounded-xl shadow-lg shadow-sky-500/20 active:scale-95 transition">
+          🚀 Run Race
+        </button>
+      </div>
+    </div>
+
+    <!-- Tabs for Mobile View -->
+    <div class="w-full flex items-center justify-between border-b border-slate-800 px-1">
+      <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Interactive Grid</span>
+      <div class="flex gap-2">
+        <button id="tab-editor" onclick="switchTab('editor')" class="text-xs font-semibold px-3 py-1.5 border-b-2 border-sky-400 text-sky-400">Editor</button>
+        <button id="tab-dijkstra" onclick="switchTab('dijkstra')" class="text-xs font-semibold px-3 py-1.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200">🔴 Dijkstra</button>
+        <button id="tab-astar" onclick="switchTab('astar')" class="text-xs font-semibold px-3 py-1.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200">🟢 A* AI</button>
+      </div>
+    </div>
+
+    <!-- Grid Viewport (Strict Horizontal Matrix Grid) -->
+    <div class="w-full flex justify-center py-2">
+      <!-- Grid Container: Rendered dynamically with CSS Grid -->
+      <div id="grid-matrix" class="matrix-grid"></div>
+    </div>
+
+    <!-- Benchmark Statistics Panel -->
+    <div id="metrics-panel" class="w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+      <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center justify-between">
+        <span>Benchmark Metrics</span>
+        <span id="status-badge" class="text-xs font-normal normal-case px-2 py-0.5 rounded bg-slate-800 text-slate-300">Ready</span>
+      </h3>
+      
+      <div class="grid grid-cols-2 gap-3 text-center">
+        <div class="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
+          <div class="text-xs font-medium text-slate-400">Dijkstra Explored</div>
+          <div id="metric-dijkstra" class="text-xl font-bold text-sky-400 mt-0.5">--</div>
+        </div>
+        <div class="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
+          <div class="text-xs font-medium text-slate-400">A* Explored</div>
+          <div id="metric-astar" class="text-xl font-bold text-purple-400 mt-0.5">--</div>
+        </div>
+      </div>
+
+      <div id="efficiency-banner" class="hidden mt-3 p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-center text-xs text-emerald-300 font-medium">
+        ⚡ A* Search explored <span id="efficiency-val" class="font-bold underline">0%</span> fewer nodes!
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Legend Footer -->
+  <footer class="w-full max-w-xl my-2 text-center">
+    <div class="flex flex-wrap items-center justify-center gap-3 text-xs text-slate-400 bg-slate-900/50 border border-slate-800/50 py-2 px-4 rounded-full">
+      <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500 inline-block"></span> Start</div>
+      <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-red-500 inline-block"></span> Goal</div>
+      <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-slate-600 inline-block"></span> Wall</div>
+      <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-500 inline-block"></span> Path</div>
+    </div>
+  </footer>
+
+  <script>
+    // App State
+    let GRID_SIZE = 6;
+    let grid = []; // 0 = empty, 1 = wall
+    let startPos = [0, 0];
+    let goalPos = [5, 5];
+    
+    let currentView = 'editor'; // 'editor', 'dijkstra', 'astar'
+    let dijkstraResult = { visited: [], path: [] };
+    let astarResult = { visited: [], path: [] };
+
+    // Initialize Grid
+    function initGrid() {
+      grid = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
+      startPos = [0, 0];
+      goalPos = [GRID_SIZE - 1, GRID_SIZE - 1];
+
+      // Initial obstacles
+      if (GRID_SIZE === 6) {
+        grid[2][1] = 1; grid[2][2] = 1; grid[2][3] = 1; grid[2][4] = 1;
+      } else {
+        grid[3][2] = 1; grid[3][3] = 1; grid[3][4] = 1; grid[3][5] = 1;
+      }
+      
+      dijkstraResult = { visited: [], path: [] };
+      astarResult = { visited: [], path: [] };
+      resetMetrics();
+      renderGrid();
+    }
+
+    function setGridSize(size) {
+      GRID_SIZE = size;
+      ['6', '8', '10'].forEach(s => {
+        const btn = document.getElementById(`btn-size-${s}`);
+        if (parseInt(s) === size) {
+          btn.className = "px-3 py-1 text-xs rounded-md font-medium transition-all bg-sky-500 text-white shadow";
+        } else {
+          btn.className = "px-3 py-1 text-xs rounded-md font-medium text-slate-400 transition-all hover:text-white";
+        }
+      });
+      initGrid();
+    }
+
+    // Dynamic Grid Renderer maintaining strict CSS grid matrix
+    function renderGrid() {
+      const container = document.getElementById('grid-matrix');
+      container.style.gridTemplateColumns = `repeat(${GRID_SIZE}, minmax(0, 1fr))`;
+      container.innerHTML = '';
+
+      for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+          const cell = document.createElement('div');
+          cell.className = 'cell cell-empty';
+          cell.dataset.r = r;
+          cell.dataset.c = c;
+
+          const isStart = r === startPos[0] && c === startPos[1];
+          const isGoal = r === goalPos[0] && c === goalPos[1];
+          const isWall = grid[r][c] === 1;
+
+          if (isStart) {
+            cell.className = 'cell cell-start';
+            cell.innerText = '🚀';
+          } else if (isGoal) {
+            cell.className = 'cell cell-goal';
+            cell.innerText = '🎯';
+          } else if (isWall) {
+            cell.className = 'cell cell-wall';
+          } else {
+            // Check view layers
+            if (currentView === 'dijkstra') {
+              if (isInPath(r, c, dijkstraResult.path)) {
+                cell.className = 'cell cell-path';
+              } else if (isVisited(r, c, dijkstraResult.visited)) {
+                cell.className = 'cell cell-visited-dijkstra';
+              }
+            } else if (currentView === 'astar') {
+              if (isInPath(r, c, astarResult.path)) {
+                cell.className = 'cell cell-path';
+              } else if (isVisited(r, c, astarResult.visited)) {
+                cell.className = 'cell cell-visited-astar';
+              }
+            }
+          }
+
+          // Toggle walls on tap/click
+          cell.onclick = () => {
+            if (currentView !== 'editor') switchTab('editor');
+            if (!isStart && !isGoal) {
+              grid[r][c] = grid[r][c] === 1 ? 0 : 1;
+              renderGrid();
+            }
+          };
+
+          container.appendChild(cell);
+        }
+      }
+    }
+
+    function isVisited(r, c, visitedList) {
+      return visitedList.some(node => node[0] === r && node[1] === c);
+    }
+
+    function isInPath(r, c, pathList) {
+      return pathList.some(node => node[0] === r && node[1] === c);
+    }
+
+    // Grid Presets
+    function randomizeGrid() {
+      switchTab('editor');
+      for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+          if ((r === startPos[0] && c === startPos[1]) || (r === goalPos[0] && c === goalPos[1])) continue;
+          grid[r][c] = Math.random() < 0.28 ? 1 : 0;
+        }
+      }
+      renderGrid();
+    }
+
+    function clearGrid() {
+      switchTab('editor');
+      for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+          grid[r][c] = 0;
+        }
+      }
+      renderGrid();
+    }
+
+    // Switch Tabs
+    function switchTab(tab) {
+      currentView = tab;
+      ['editor', 'dijkstra', 'astar'].forEach(t => {
+        const el = document.getElementById(`tab-${t}`);
+        if (t === tab) {
+          el.className = 'text-xs font-semibold px-3 py-1.5 border-b-2 border-sky-400 text-sky-400';
+        } else {
+          el.className = 'text-xs font-semibold px-3 py-1.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200';
+        }
+      });
+      renderGrid();
+    }
+
+    // Pathfinding Benchmark Logic
+    function runRaceBenchmark() {
+      dijkstraResult = solvePathfinding(false);
+      astarResult = solvePathfinding(true);
+
+      document.getElementById('metric-dijkstra').innerText = dijkstraResult.visited.length;
+      document.getElementById('metric-astar').innerText = astarResult.visited.length;
+
+      const diff = dijkstraResult.visited.length - astarResult.visited.length;
+      if (diff > 0 && dijkstraResult.visited.length > 0) {
+        const pct = Math.round((diff / dijkstraResult.visited.length) * 100);
+        document.getElementById('efficiency-val').innerText = `${pct}% (${diff} nodes)`;
+        document.getElementById('efficiency-banner').classList.remove('hidden');
+      } else {
+        document.getElementById('efficiency-banner').classList.add('hidden');
+      }
+
+      document.getElementById('status-badge').innerText = 'Race Completed';
+      document.getElementById('status-badge').className = 'text-xs font-semibold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800';
+
+      switchTab('astar');
+    }
+
+    function solvePathfinding(useHeuristic) {
+      const openSet = [{ pos: startPos, g: 0, f: 0 }];
+      const visited = [];
+      const cameFrom = {};
+      const gScore = {};
+
+      for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+          gScore[`${r},${c}`] = Infinity;
+        }
+      }
+      gScore[`${startPos[0]},${startPos[1]}`] = 0;
+
+      while (openSet.length > 0) {
+        // Sort by f score
+        openSet.sort((a, b) => a.f - b.f);
+        const current = openSet.shift().pos;
+
+        if (!visited.some(n => n[0] === current[0] && n[1] === current[1])) {
+          visited.push(current);
+        }
+
+        if (current[0] === goalPos[0] && current[1] === goalPos[1]) break;
+
+        const neighbors = [
+          [current[0] + 1, current[1]],
+          [current[0] - 1, current[1]],
+          [current[0], current[1] + 1],
+          [current[0], current[1] - 1]
+        ];
+
+        for (const [nr, nc] of neighbors) {
+          if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE && grid[nr][nc] === 0) {
+            const tentativeG = gScore[`${current[0]},${current[1]}`] + 1;
+            if (tentativeG < gScore[`${nr},${nc}`]) {
+              cameFrom[`${nr},${nc}`] = current;
+              gScore[`${nr},${nc}`] = tentativeG;
+              const h = useHeuristic ? Math.abs(nr - goalPos[0]) + Math.abs(nc - goalPos[1]) : 0;
+              const f = tentativeG + h;
+
+              if (!openSet.some(item => item.pos[0] === nr && item.pos[1] === nc)) {
+                openSet.push({ pos: [nr, nc], g: tentativeG, f: f });
+              }
+            }
+          }
+        }
+      }
+
+      // Reconstruct Path
+      const path = [];
+      let currKey = `${goalPos[0]},${goalPos[1]}`;
+      if (cameFrom[currKey] || (goalPos[0] === startPos[0] && goalPos[1] === startPos[1])) {
+        let curr = goalPos;
+        while (curr) {
+          path.unshift(curr);
+          curr = cameFrom[`${curr[0]},${curr[1]}`];
+        }
+      }
+
+      return { visited, path };
+    }
+
+    function resetMetrics() {
+      document.getElementById('metric-dijkstra').innerText = '--';
+      document.getElementById('metric-astar').innerText = '--';
+      document.getElementById('efficiency-banner').classList.add('hidden');
+      document.getElementById('status-badge').innerText = 'Ready';
+      document.getElementById('status-badge').className = 'text-xs font-normal normal-case px-2 py-0.5 rounded bg-slate-800 text-slate-300';
+    }
+
+    // Initial Load
+    window.onload = initGrid;
+  </script>
+</body>
+</html>
