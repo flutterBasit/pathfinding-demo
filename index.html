@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dual Pathfinding Visualizer (Dijkstra vs A*)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            touch-action: manipulation;
+        }
+
+        /* Prevent unwanted touch actions/scrolling ONLY on the grid container when drawing */
+        .canvas-grid {
+            touch-action: none; /* Prevents scroll interference while actively drawing/dragging nodes */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Node Animations */
+        @keyframes nodeVisited {
+            0% { transform: scale(0.3); background-color: rgba(99, 102, 241, 0.3); border-radius: 100%; }
+            50% { background-color: rgba(168, 85, 247, 0.7); }
+            75% { transform: scale(1.1); background-color: rgba(59, 130, 246, 0.8); }
+            100% { transform: scale(1); background-color: #3b82f6; border-radius: 4px; }
+        }
+
+        @keyframes nodePath {
+            0% { transform: scale(0.5); background-color: #fbbf24; border-radius: 50%; }
+            50% { transform: scale(1.2); background-color: #f59e0b; }
+            100% { transform: scale(1); background-color: #10b981; border-radius: 4px; }
+        }
+
+        @keyframes wallPop {
+            0% { transform: scale(0.6); }
+            100% { transform: scale(1); }
+        }
+
+        .node-visited {
+            animation: nodeVisited 0.4s ease-out forwards;
+        }
+
+        .node-path {
+            animation: nodePath 0.4s ease-out forwards;
+        }
+
+        .node-wall {
+            animation: wallPop 0.15s ease-out forwards;
+            background-color: #334155 !important;
+            border-color: #475569 !important;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col bg-slate-900 text-slate-100 overflow-x-hidden">
+
+    <!-- Header / Navbar -->
+    <header class="bg-slate-800/80 backdrop-blur border-b border-slate-700/80 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-500/30">
+                    <i class="fa-solid me-0 fa-route text-xl text-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+                        Pathfinding Visualizer
+                    </h1>
+                    <p class="text-xs text-slate-400 hidden sm:block">Compare Dijkstra vs A* Algorithm in Real-time</p>
+                </div>
+            </div>
+
+            <!-- Controls Toolbar -->
+            <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                <button id="btn-visualize" onclick="startVisualization()" class="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-medium rounded-lg shadow-md transition-all active:scale-95 text-sm">
+                    <i class="fa-solid fa-play"></i>
+                    <span>Visualize</span>
+                </button>
+
+                <button onclick="clearPathOnly()" class="flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium rounded-lg transition-all text-sm">
+                    <i class="fa-solid fa-eraser text-xs"></i>
+                    <span>Clear Path</span>
+                </button>
+
+                <button onclick="clearBoard()" class="flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium rounded-lg transition-all text-sm">
+                    <i class="fa-solid fa-trash-can text-xs"></i>
+                    <span>Clear Walls</span>
+                </button>
+
+                <button onclick="generateMaze()" class="flex items-center gap-1.5 px-3 py-2 bg-purple-600/80 hover:bg-purple-600 text-white font-medium rounded-lg transition-all text-sm">
+                    <i class="fa-solid fa-cubes-stacked text-xs"></i>
+                    <span>Generate Maze</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Sub-bar Settings & Stats -->
+    <div class="bg-slate-800/40 border-b border-slate-800 px-4 py-2">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4 text-xs">
+            
+            <!-- Speed Control -->
+            <div class="flex items-center gap-3">
+                <label for="speed-range" class="text-slate-400 font-medium flex items-center gap-1">
+                    <i class="fa-solid fa-gauge-high"></i> Speed:
+                </label>
+                <input id="speed-range" type="range" min="5" max="50" value="25" class="w-24 sm:w-32 accent-indigo-500 h-1.5 bg-slate-700 rounded-lg cursor-pointer">
+            </div>
+
+            <!-- Legend -->
+            <div class="flex flex-wrap items-center gap-4 text-slate-300">
+                <div class="flex items-center gap-1.5">
+                    <span class="w-3.5 h-3.5 rounded-full bg-emerald-500 inline-block shadow-sm"></span>
+                    <span>Start</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-3.5 h-3.5 rounded-full bg-rose-500 inline-block shadow-sm"></span>
+                    <span>Target</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-3.5 h-3.5 rounded bg-slate-700 border border-slate-600 inline-block"></span>
+                    <span>Wall</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-3.5 h-3.5 rounded bg-blue-500 inline-block"></span>
+                    <span>Visited</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-3.5 h-3.5 rounded bg-emerald-400 inline-block"></span>
+                    <span>Shortest Path</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Dual View Area -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-2 sm:p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        
+        <!-- Board 1: Dijkstra Algorithm -->
+        <div class="bg-slate-800/60 rounded-xl border border-slate-700/60 p-3 flex flex-col shadow-xl">
+            <div class="flex items-center justify-between mb-2 px-1">
+                <div class="flex items-center gap-2">
+                    <span class="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-semibold text-xs border border-indigo-500/30">Dijkstra's Algorithm</span>
+                    <span class="text-xs text-slate-400 hidden sm:inline">(Guarantees Shortest Path, Uninformed)</span>
+                </div>
+                <div class="text-xs font-mono text-slate-400 flex gap-3">
+                    <span>Visited: <strong id="dijkstra-visited-count" class="text-slate-200">0</strong></span>
+                    <span>Path: <strong id="dijkstra-path-count" class="text-slate-200">0</strong></span>
+                </div>
+            </div>
+
+            <!-- Scrollable container for mobile usability -->
+            <div class="flex-1 overflow-auto custom-scrollbar rounded-lg border border-slate-700/80 bg-slate-950 p-1 flex items-center justify-center min-h-[300px]">
+                <div id="grid-dijkstra" class="canvas-grid grid gap-[1px] bg-slate-800/40"></div>
+            </div>
+        </div>
+
+        <!-- Board 2: A* Search Algorithm -->
+        <div class="bg-slate-800/60 rounded-xl border border-slate-700/60 p-3 flex flex-col shadow-xl">
+            <div class="flex items-center justify-between mb-2 px-1">
+                <div class="flex items-center gap-2">
+                    <span class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold text-xs border border-purple-500/30">A* Search (Heuristic)</span>
+                    <span class="text-xs text-slate-400 hidden sm:inline">(Manhattan Distance)</span>
+                </div>
+                <div class="text-xs font-mono text-slate-400 flex gap-3">
+                    <span>Visited: <strong id="astar-visited-count" class="text-slate-200">0</strong></span>
+                    <span>Path: <strong id="astar-path-count" class="text-slate-200">0</strong></span>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-auto custom-scrollbar rounded-lg border border-slate-700/80 bg-slate-950 p-1 flex items-center justify-center min-h-[300px]">
+                <div id="grid-astar" class="canvas-grid grid gap-[1px] bg-slate-800/40"></div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-slate-900 border-t border-slate-800 py-3 text-center text-xs text-slate-500">
+        Touch & Drag on grid to draw walls or move start/target nodes. Scroll page freely without losing path states.
+    </footer>
+
+    <!-- Logic Script -->
+    <script>
+        const ROWS = 21;
+        const COLS = 21;
+
+        let startNode = { row: 10, col: 4 };
+        let targetNode = { row: 10, col: 16 };
+
+        let walls = new Set();
+        let isMouseDown = false;
+        let isDraggingStart = false;
+        let isDraggingTarget = false;
+        let activeTouchId = null;
+
+        let isRunning = false;
+        let currentAnimationTimeouts = [];
+
+        // Grid Elements Store
+        const gridDijkstra = document.getElementById('grid-dijkstra');
+        const gridAstar = document.getElementById('grid-astar');
+
+        // Setup Responsive Layout Grid
+        function initGrids() {
+            gridDijkstra.style.gridTemplateColumns = `repeat(${COLS}, minmax(0, 1fr))`;
+            gridAstar.style.gridTemplateColumns = `repeat(${COLS}, minmax(0, 1fr))`;
+
+            gridDijkstra.innerHTML = '';
+            gridAstar.innerHTML = '';
+
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    gridDijkstra.appendChild(createNodeElement(r, c, 'dijkstra'));
+                    gridAstar.appendChild(createNodeElement(r, c, 'astar'));
+                }
+            }
+            renderNodesState();
+        }
+
+        function getKey(r, c) {
+            return `${r}-${c}`;
+        }
+
+        function createNodeElement(row, col, boardType) {
+            const el = document.createElement('div');
+            el.dataset.row = row;
+            el.dataset.col = col;
+            el.dataset.board = boardType;
+            el.className = `w-4 h-4 sm:w-6 sm:h-6 md:w-7 md:h-7 rounded-[3px] border border-slate-800/60 bg-slate-900 transition-colors duration-150 cursor-pointer flex items-center justify-center text-[10px] select-none`;
+
+            // Mouse Events
+            el.addEventListener('mousedown', (e) => handlePointerStart(row, col, e));
+            el.addEventListener('mouseenter', () => handlePointerEnter(row, col));
+            el.addEventListener('mouseup', handlePointerEnd);
+
+            return el;
+        }
+
+        // Consolidated Mouse & Touch Handlers
+        function handlePointerStart(row, col, e) {
+            if (isRunning) return;
+            
+            isMouseDown = true;
+            if (row === startNode.row && col === startNode.col) {
+                isDraggingStart = true;
+            } else if (row === targetNode.row && col === targetNode.col) {
+                isDraggingTarget = true;
+            } else {
+                toggleWall(row, col);
+            }
+        }
+
+        function handlePointerEnter(row, col) {
+            if (!isMouseDown || isRunning) return;
+
+            if (isDraggingStart) {
+                if (!isWall(row, col) && !(row === targetNode.row && col === targetNode.col)) {
+                    startNode = { row, col };
+                    renderNodesState();
+                }
+            } else if (isDraggingTarget) {
+                if (!isWall(row, col) && !(row === startNode.row && col === startNode.col)) {
+                    targetNode = { row, col };
+                    renderNodesState();
+                }
+            } else {
+                toggleWall(row, col);
+            }
+        }
+
+        function handlePointerEnd() {
+            isMouseDown = false;
+            isDraggingStart = false;
+            isDraggingTarget = false;
+            activeTouchId = null;
+        }
+
+        // Global Touch Event Listeners configured for persistent state during scroll
+        window.addEventListener('mouseup', handlePointerEnd);
+
+        // Touch Interaction Logic without overriding scroll
+        function setupTouchListeners(container) {
+            container.addEventListener('touchstart', (e) => {
+                if (isRunning) return;
+                // Only hijack touch if it starts on a valid node
+                const touch = e.touches[0];
+                const targetEl = document.elementFromPoint(touch.clientX, touch.clientY);
+                if (targetEl && targetEl.dataset && targetEl.dataset.row !== undefined) {
+                    activeTouchId = touch.identifier;
+                    const r = parseInt(targetEl.dataset.row);
+                    const c = parseInt(targetEl.dataset.col);
+                    
+                    // If moving start or target, prevent page scroll while dragging
+                    if ((r === startNode.row && c === startNode.col) || (r === targetNode.row && c === targetNode.col)) {
+                        e.preventDefault();
+                    }
+                    handlePointerStart(r, c, e);
+                }
+            }, { passive: false });
+
+            container.addEventListener('touchmove', (e) => {
+                if (!isMouseDown || isRunning) return;
+                
+                // Find matching touch
+                let touch = null;
+                for (let i = 0; i < e.touches.length; i++) {
+                    if (e.touches[i].identifier === activeTouchId) {
+                        touch = e.touches[i];
+                        break;
+                    }
+                }
+                if (!touch) return;
+
+                const targetEl = document.elementFromPoint(touch.clientX, touch.clientY);
+                if (targetEl && targetEl.dataset && targetEl.dataset.row !== undefined) {
+                    // Prevent page scroll when deliberately drawing/moving nodes inside canvas
+                    if (e.cancelable) e.preventDefault();
+                    
+                    const r = parseInt(targetEl.dataset.row);
+                    const c = parseInt(targetEl.dataset.col);
+                    handlePointerEnter(r, c);
+                }
+            }, { passive: false });
+
+            container.addEventListener('touchend', handlePointerEnd);
+            container.addEventListener('touchcancel', handlePointerEnd);
+        }
+
+        setupTouchListeners(gridDijkstra);
+        setupTouchListeners(gridAstar);
+
+        function toggleWall(r, c) {
+            const key = getKey(r, c);
+            if ((r === startNode.row && c === startNode.col) || (r === targetNode.row && c === targetNode.col)) return;
+
+            if (walls.has(key)) {
+                walls.delete(key);
+            } else {
+                walls.add(key);
+            }
+            renderNodesState();
+        }
+
+        function isWall(r, c) {
+            return walls.has(getKey(r, c));
+        }
+
+        function renderNodesState() {
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const elDijkstra = gridDijkstra.children[r * COLS + c];
+                    const elAstar = gridAstar.children[r * COLS + c];
+                    
+                    updateSingleNodeAppearance(elDijkstra, r, c);
+                    updateSingleNodeAppearance(elAstar, r, c);
+                }
+            }
+        }
+
+        function updateSingleNodeAppearance(el, r, c) {
+            // Keep existing visualization classes intact during scrolling or updates
+            const isVisited = el.classList.contains('node-visited');
+            const isPath = el.classList.contains('node-path');
+
+            el.className = `w-4 h-4 sm:w-6 sm:h-6 md:w-7 md:h-7 rounded-[3px] border border-slate-800/60 transition-colors duration-150 flex items-center justify-center text-[10px] select-none`;
+
+            if (r === startNode.row && c === startNode.col) {
+                el.classList.add('bg-emerald-500', 'text-white');
+                el.innerHTML = '<i class="fa-solid fa-play text-[8px] sm:text-[10px]"></i>';
+            } else if (r === targetNode.row && c === targetNode.col) {
+                el.classList.add('bg-rose-500', 'text-white');
+                el.innerHTML = '<i class="fa-solid fa-location-dot text-[8px] sm:text-[10px]"></i>';
+            } else if (isWall(r, c)) {
+                el.classList.add('node-wall');
+                el.innerHTML = '';
+            } else {
+                el.innerHTML = '';
+                if (isPath) {
+                    el.classList.add('node-path', 'bg-emerald-400');
+                } else if (isVisited) {
+                    el.classList.add('node-visited', 'bg-blue-500');
+                } else {
+                    el.classList.add('bg-slate-900');
+                }
+            }
+        }
+
+        function clearPathOnly() {
+            stopAnimations();
+            document.querySelectorAll('.node-visited').forEach(el => el.classList.remove('node-visited'));
+            document.querySelectorAll('.node-path').forEach(el => el.classList.remove('node-path'));
+            document.getElementById('dijkstra-visited-count').innerText = '0';
+            document.getElementById('dijkstra-path-count').innerText = '0';
+            document.getElementById('astar-visited-count').innerText = '0';
+            document.getElementById('astar-path-count').innerText = '0';
+            renderNodesState();
+        }
+
+        function clearBoard() {
+            clearPathOnly();
+            walls.clear();
+            renderNodesState();
+        }
+
+        function stopAnimations() {
+            currentAnimationTimeouts.forEach(t => clearTimeout(t));
+            currentAnimationTimeouts = [];
+            isRunning = false;
+        }
+
+        function generateMaze() {
+            clearBoard();
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if ((r === startNode.row && c === startNode.col) || (r === targetNode.row && c === targetNode.col)) continue;
+                    if (Math.random() < 0.28) {
+                        walls.add(getKey(r, c));
+                    }
+                }
+            }
+            renderNodesState();
+        }
+
+        // --- Pathfinding Algorithms ---
+
+        function getNeighbors(node) {
+            const neighbors = [];
+            const { row, col } = node;
+            if (row > 0) neighbors.push({ row: row - 1, col });
+            if (row < ROWS - 1) neighbors.push({ row: row + 1, col });
+            if (col > 0) neighbors.push({ row, col: col - 1 });
+            if (col < COLS - 1) neighbors.push({ row, col: col + 1 });
+            return neighbors;
+        }
+
+        function runDijkstra() {
+            const visitedNodesInOrder = [];
+            const distance = {};
+            const previous = {};
+            const unvisited = [];
+
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const key = getKey(r, c);
+                    distance[key] = Infinity;
+                    previous[key] = null;
+                    unvisited.push({ row: r, col: c });
+                }
+            }
+
+            const startKey = getKey(startNode.row, startNode.col);
+            distance[startKey] = 0;
+
+            while (unvisited.length > 0) {
+                unvisited.sort((a, b) => distance[getKey(a.row, a.col)] - distance[getKey(b.row, b.col)]);
+                const closest = unvisited.shift();
+                const closestKey = getKey(closest.row, closest.col);
+
+                if (isWall(closest.row, closest.col)) continue;
+                if (distance[closestKey] === Infinity) break;
+
+                visitedNodesInOrder.push(closest);
+
+                if (closest.row === targetNode.row && closest.col === targetNode.col) break;
+
+                const neighbors = getNeighbors(closest);
+                for (const neighbor of neighbors) {
+                    const nKey = getKey(neighbor.row, neighbor.col);
+                    if (isWall(neighbor.row, neighbor.col)) continue;
+                    const alt = distance[closestKey] + 1;
+                    if (alt < distance[nKey]) {
+                        distance[nKey] = alt;
+                        previous[nKey] = closest;
+                    }
+                }
+            }
+
+            const shortestPath = [];
+            let curr = targetNode;
+            while (curr) {
+                const currKey = getKey(curr.row, curr.col);
+                if (distance[currKey] === Infinity && (curr.row !== startNode.row || curr.col !== startNode.col)) {
+                    break; // Target unreachable
+                }
+                shortestPath.unshift(curr);
+                curr = previous[currKey];
+                if (curr && curr.row === startNode.row && curr.col === startNode.col) {
+                    shortestPath.unshift(curr);
+                    break;
+                }
+            }
+
+            return { visitedNodesInOrder, shortestPath };
+        }
+
+        function runAStar() {
+            const visitedNodesInOrder = [];
+            const openSet = [{ ...startNode, g: 0, h: heuristic(startNode, targetNode), f: heuristic(startNode, targetNode) }];
+            const gScore = {};
+            const fScore = {};
+            const previous = {};
+
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const key = getKey(r, c);
+                    gScore[key] = Infinity;
+                    fScore[key] = Infinity;
+                }
+            }
+
+            const startKey = getKey(startNode.row, startNode.col);
+            gScore[startKey] = 0;
+            fScore[startKey] = heuristic(startNode, targetNode);
+
+            while (openSet.length > 0) {
+                openSet.sort((a, b) => a.f - b.f);
+                const current = openSet.shift();
+                const currentKey = getKey(current.row, current.col);
+
+                if (isWall(current.row, current.col)) continue;
+
+                visitedNodesInOrder.push(current);
+
+                if (current.row === targetNode.row && current.col === targetNode.col) break;
+
+                const neighbors = getNeighbors(current);
+                for (const neighbor of neighbors) {
+                    if (isWall(neighbor.row, neighbor.col)) continue;
+
+                    const nKey = getKey(neighbor.row, neighbor.col);
+                    const tentativeG = gScore[currentKey] + 1;
+
+                    if (tentativeG < gScore[nKey]) {
+                        previous[nKey] = current;
+                        gScore[nKey] = tentativeG;
+                        const h = heuristic(neighbor, targetNode);
+                        fScore[nKey] = tentativeG + h;
+
+                        if (!openSet.some(node => node.row === neighbor.row && node.col === neighbor.col)) {
+                            openSet.push({ ...neighbor, g: tentativeG, h, f: tentativeG + h });
+                        }
+                    }
+                }
+            }
+
+            const shortestPath = [];
+            let curr = targetNode;
+            while (curr) {
+                const currKey = getKey(curr.row, curr.col);
+                if (gScore[currKey] === Infinity && (curr.row !== startNode.row || curr.col !== startNode.col)) {
+                    break;
+                }
+                shortestPath.unshift(curr);
+                curr = previous[currKey];
+                if (curr && curr.row === startNode.row && curr.col === startNode.col) {
+                    shortestPath.unshift(curr);
+                    break;
+                }
+            }
+
+            return { visitedNodesInOrder, shortestPath };
+        }
+
+        function heuristic(a, b) {
+            return Math.abs(a.row - b.row) + Math.abs(a.col - b.col);
+        }
+
+        // Animated Dual Execution
+        function startVisualization() {
+            if (isRunning) return;
+            clearPathOnly();
+            isRunning = true;
+
+            const speedInput = parseInt(document.getElementById('speed-range').value);
+            const delay = 55 - speedInput; // Speed mapping
+
+            const dijkstraResult = runDijkstra();
+            const astarResult = runAStar();
+
+            document.getElementById('dijkstra-visited-count').innerText = dijkstraResult.visitedNodesInOrder.length;
+            document.getElementById('astar-visited-count').innerText = astarResult.visitedNodesInOrder.length;
+
+            const maxVisited = Math.max(dijkstraResult.visitedNodesInOrder.length, astarResult.visitedNodesInOrder.length);
+
+            // Animate Visited Nodes concurrently
+            for (let i = 0; i < maxVisited; i++) {
+                const timeout = setTimeout(() => {
+                    if (i < dijkstraResult.visitedNodesInOrder.length) {
+                        const node = dijkstraResult.visitedNodesInOrder[i];
+                        if (!(node.row === startNode.row && node.col === startNode.col) && !(node.row === targetNode.row && node.col === targetNode.col)) {
+                            const el = gridDijkstra.children[node.row * COLS + node.col];
+                            el.classList.add('node-visited');
+                        }
+                    }
+
+                    if (i < astarResult.visitedNodesInOrder.length) {
+                        const node = astarResult.visitedNodesInOrder[i];
+                        if (!(node.row === startNode.row && node.col === startNode.col) && !(node.row === targetNode.row && node.col === targetNode.col)) {
+                            const el = gridAstar.children[node.row * COLS + node.col];
+                            el.classList.add('node-visited');
+                        }
+                    }
+
+                    // Once Visited animation finishes, animate shortest paths
+                    if (i === maxVisited - 1) {
+                        animateShortestPaths(dijkstraResult.shortestPath, astarResult.shortestPath, delay);
+                    }
+                }, i * delay);
+
+                currentAnimationTimeouts.push(timeout);
+            }
+        }
+
+        function animateShortestPaths(dijkstraPath, astarPath, delay) {
+            const maxPath = Math.max(dijkstraPath.length, astarPath.length);
+            
+            if (dijkstraPath.length > 0) {
+                document.getElementById('dijkstra-path-count').innerText = dijkstraPath.length;
+            }
+            if (astarPath.length > 0) {
+                document.getElementById('astar-path-count').innerText = astarPath.length;
+            }
+
+            for (let i = 0; i < maxPath; i++) {
+                const timeout = setTimeout(() => {
+                    if (i < dijkstraPath.length) {
+                        const node = dijkstraPath[i];
+                        if (!(node.row === startNode.row && node.col === startNode.col) && !(node.row === targetNode.row && node.col === targetNode.col)) {
+                            const el = gridDijkstra.children[node.row * COLS + node.col];
+                            el.classList.remove('node-visited');
+                            el.classList.add('node-path');
+                        }
+                    }
+
+                    if (i < astarPath.length) {
+                        const node = astarPath[i];
+                        if (!(node.row === startNode.row && node.col === startNode.col) && !(node.row === targetNode.row && node.col === targetNode.col)) {
+                            const el = gridAstar.children[node.row * COLS + node.col];
+                            el.classList.remove('node-visited');
+                            el.classList.add('node-path');
+                        }
+                    }
+
+                    if (i === maxPath - 1) {
+                        isRunning = false;
+                    }
+                }, i * (delay * 1.5));
+
+                currentAnimationTimeouts.push(timeout);
+            }
+        }
+
+        // Initialize on Window Load
+        window.onload = function () {
+            initGrids();
+        };
+    </script>
+</body>
+</html>
